@@ -1,0 +1,27 @@
+[project]
+name = "phylo-shape"
+version = "0.1.0"
+description = "Phylogenetic morphological traits inference prototype"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "hyperiax",
+    "pandas",
+    "matplotlib",
+    "ete3",
+    "pyqt5>=5.15.11",
+    "h5py>=3.16.0",
+    "pyyaml>=6.0.3",
+    "seaborn>=0.13.2",
+    "tqdm>=4.68.2",
+    "jax>=0.10.1",
+    "jaxlib>=0.10.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+gpu = [
+    "jax[cuda13]>=0.10.1",
+]

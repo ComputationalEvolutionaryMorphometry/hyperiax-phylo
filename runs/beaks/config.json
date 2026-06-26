@@ -1,0 +1,40 @@
+{
+  "augment": {
+    "remove_lmk": null
+  },
+  "dataset_h5_path": "data/beaks/large/data.h5",
+  "driver": {
+    "chain_backend": "process",
+    "k_alpha_proposal_var": 0.01,
+    "k_sigma_proposal_var": 0.01,
+    "num_chains": 4,
+    "num_processes": 0,
+    "num_samples": 5000,
+    "obs_var_proposal_var": 0.01,
+    "pcn_eta": 0.9,
+    "progress_bar": true,
+    "random_seed": 0
+  },
+  "model": {
+    "covar_jitter": 0.0,
+    "dist_jitter": 0.0,
+    "enable_x64": true,
+    "k_alpha_init": null,
+    "k_alpha_max": 1.0,
+    "k_alpha_min": 1e-05,
+    "k_alpha_prior_alpha": 3.0,
+    "k_alpha_prior_beta": 0.1,
+    "k_sigma_init": null,
+    "k_sigma_max": 1.0,
+    "k_sigma_min": 1e-05,
+    "k_sigma_prior_alpha": 3.0,
+    "k_sigma_prior_beta": 0.1,
+    "num_edge_steps": 25,
+    "obs_var_init": null,
+    "obs_var_max": 0.1,
+    "obs_var_min": 0.0001,
+    "obs_var_prior_alpha": 2.0,
+    "obs_var_prior_beta": 0.002
+  },
+  "node_count": 696
+}

@@ -1,0 +1,101 @@
+# --h5: augmented shape HDF5 file used as the observed dataset.
+h5: data/beaks/data.h5
+
+# --run-name: run name under runs/.
+run_name: beaks
+
+# --gpu-visible: optional physical GPU index to expose to JAX/CUDA; null leaves the environment unchanged.
+gpu_visible: 1
+
+augment:
+  # remove_lmk: null disables landmark removal. Use an integer index or a list
+  # of 0-based landmark indices to drop them immediately after HDF5 loading.
+  remove_lmk: null
+
+model:
+  # --num-edge-steps: guided discretization steps used on each tree edge.
+  num_edge_steps: 25
+
+  # --covar-jitter: diagonal covariance nugget added before Cholesky.
+  covar_jitter: 0.0
+
+  # --dist-jitter: jitter inside the landmark distance calculation.
+  dist_jitter: 0.0
+
+  # k_alpha_init: null samples k_alpha from its prior; use a scalar for all
+  # chains or a list with one value per chain.
+  k_alpha_init: null
+
+  # k_alpha_prior_alpha / beta: inverse-gamma prior shape and scale for k_alpha.
+  k_alpha_prior_alpha: 3.0
+  k_alpha_prior_beta: 0.1
+
+  # k_alpha_max / min: allowed positive runtime range for k_alpha.
+  k_alpha_max: 1.0
+  k_alpha_min: 1e-5
+
+  # k_sigma_init: null samples k_sigma from its prior; use a scalar for all
+  # chains or a list with one value per chain.
+  k_sigma_init: null
+
+  # k_sigma_prior_alpha / beta: inverse-gamma prior shape and scale for k_sigma.
+  k_sigma_prior_alpha: 3.0
+  k_sigma_prior_beta: 0.1
+
+  # --k-sigma-max / min: upper and lower bounds applied to proposed k_sigma values.
+  k_sigma_max: 1.0
+  k_sigma_min: 1e-5
+
+  # obs_var_init: null samples obs_var from its prior; use a scalar for all
+  # chains or a list with one value per chain.
+  obs_var_init: null
+
+  # obs_var_prior_alpha / beta: inverse-gamma prior shape and scale for obs_var.
+  obs_var_prior_alpha: 2.0
+  obs_var_prior_beta: 0.002
+
+  # obs_var_max / min: allowed positive runtime range for obs_var.
+  obs_var_max: 0.1
+  obs_var_min: 1e-4
+
+  # enable_x64: enable JAX float64 in the MCMC context.
+  enable_x64: true
+
+driver:
+  # --num-samples: total full-chain MCMC iterations stored in artifacts.h5.
+  num_samples: 5000
+
+  # --num-chains: number of MCMC chains to run.
+  num_chains: 4
+
+  # --pcn-eta: pCN persistence for latent noise proposals.
+  pcn_eta: 0.9
+
+  # --k-alpha-proposal-var: lognormal random-walk variance for k_alpha.
+  k_alpha_proposal_var: 0.01
+
+  # --k-sigma-proposal-var: lognormal random-walk variance for k_sigma.
+  k_sigma_proposal_var: 0.01
+
+  # --obs-var-proposal-var: lognormal random-walk variance for obs_var.
+  obs_var_proposal_var: 0.01
+
+  # --random-seed: PRNG seed for initial states and proposals.
+  random_seed: 0
+
+  # chain_backend: "sequential" runs chains in the main process; "process" runs
+  # independent chain chunks in spawned worker processes.
+  chain_backend: process
+
+  # num_processes: worker process count when chain_backend is "process"; 0 auto-selects.
+  num_processes: 0
+
+  # progress_bar: set this to false to silence progress output.
+  progress_bar: true
+
+plot:
+  # scripts.evaluate reads this through --config; samples to skip only during downstream plotting.
+  num_burnin: 500
+
+  # scripts.evaluate reads this through --config; stride used only for histogram plotting.
+  thin: 1
