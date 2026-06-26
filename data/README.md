@@ -1,6 +1,6 @@
 # Data
 
-The private shape datasets are not included in this repository.
+The shape datasets are not included in this repository.
 
 Place local copies in this layout before running the pipeline:
 
