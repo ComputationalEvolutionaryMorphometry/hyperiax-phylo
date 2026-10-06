@@ -1,8 +1,8 @@
 # Data
 
-The shape datasets are not included in this repository.
+This directory contains the Procrustes aligned landmark data file (data.h5), original phylogenetic tree topology file (tree.nwk), and drawn phylogenetic tree figures for both butterfly wings and bird beaks. The data can be reproduced by running the proprocessing scripts.
 
-Place local copies in this layout before running the pipeline:
+The file structure follows:
 
 ```text
 data/butterflies/
