@@ -1,0 +1,35 @@
+# Integration check (GPU primary backend); timings are NOT publication benchmarks.
+output_root: runs/profiling
+smoke: true
+experiments: [full, scaling, reference]
+primary_backend: gpu
+gpu_index: 0
+cpu_affinity: null
+cpu_threads: 8
+seed: 0
+model_overrides: {enable_x64: true, num_edge_steps: 25}
+benchmark:
+  repeats: 1
+  target_warmup: 1
+  target_iterations: 3
+  mcmc_warmup: 2
+  mcmc_iterations: 5
+  min_measure_seconds: 0
+  timeout_seconds: 300
+  memory_interval_seconds: 0.05
+full: {num_chains: 2, num_samples: 100, num_processes: 2, timeout_seconds: 300}
+# Post-processing only; short smoke chains are not convergence evidence.
+full_diagnostics: {burnin_fraction: 0.1}
+reference_dataset: butterflies
+reference_landmarks: [8, 16, 32]
+datasets:
+  butterflies:
+    analysis_config: config/butterflies.yaml
+    tips: [4, 8, 16, 32]
+    landmarks: [4, 8, 16, 32]
+    params: {k_alpha: 0.134, k_sigma: 0.212, obs_var: 0.00125}
+  beaks:
+    analysis_config: config/beaks.yaml
+    tips: [4, 8, 16, 32]
+    landmarks: [4, 8, 16, 32]
+    params: {k_alpha: 0.113, k_sigma: 0.152, obs_var: 0.000408}

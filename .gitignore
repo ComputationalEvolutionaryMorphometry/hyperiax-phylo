@@ -28,3 +28,6 @@ wheels/
 
 .DS_Store
 AGENTS.md
+
+# Generated performance experiments (configs and implementation remain tracked).
+/runs/profiling/

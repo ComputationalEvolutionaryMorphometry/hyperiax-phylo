@@ -30,6 +30,7 @@ from src.loader import AugmentedButterflyTree, load_augmented_butterfly_tree
 from src.run_artifacts import prepare_run_dir, save_run_artifacts
 
 MCMC_PARAMETER_NAMES = ("k_alpha", "k_sigma", "obs_var")
+StatusCallback = Callable[[int | None, str, int, int | None], None]
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class MCMCDriverConfig:
     progress_bar: bool = True
     chain_backend: str = "sequential"
     num_processes: int = 0
+    profile_warmup_iterations: int | None = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,7 @@ class ChainResult:
     initial_params: MCMCParams
     final_params: MCMCParams
     final_noise: np.ndarray
+    timings: dict[str, float | int] | None = None
 
 
 @dataclass(frozen=True)
@@ -179,8 +182,14 @@ def run_mcmc_chain(
     target_and_phylo_root_state: Callable[[MCMCParams, jax.Array], tuple[jax.Array, jax.Array]] | None = None,
     collect_phylo_root_samples: bool = False,
     progress_callback: Callable[[int | None, int, float, float], None] | None = None,
+    status_callback: StatusCallback | None = None,
 ) -> ChainResult:
-    """Run one MH chain."""
+    """Run one MH chain.
+
+    Optional status_callback receives (chain_index, phase, completed, total),
+    with total=None for indeterminate initialization. Iteration callbacks run
+    inside the sampling loop; expensive observers should throttle their I/O.
+    """
 
     driver_config = driver_config or MCMCDriverConfig()
     _validate_driver_config(driver_config)
@@ -199,6 +208,10 @@ def run_mcmc_chain(
         current_params = _clamp_params_to_model_bounds(current_params, context.config)
     chain_initial_params = current_params
 
+    if status_callback is not None:
+        status_callback(chain_index, "First target / JIT", 0, None)
+    profiling = driver_config.profile_warmup_iterations is not None
+    initial_target_start = time.perf_counter() if profiling else 0.0
     if collect_phylo_root_samples:
         target_and_phylo_root_state = target_and_phylo_root_state or _build_mcmc_target_and_phylo_root_state(context)
         current_logp, current_phylo_root_state = target_and_phylo_root_state(current_params, current_noise)
@@ -206,6 +219,10 @@ def run_mcmc_chain(
         target = target or _build_mcmc_target(context)
         current_logp = target(current_params, current_noise)
         current_phylo_root_state = None
+
+    if profiling:
+        jax.block_until_ready((current_logp, current_phylo_root_state))
+        initial_target_seconds = time.perf_counter() - initial_target_start
 
     log_posteriors: list[float] = []
     samples = _empty_parameter_buffers()
@@ -222,6 +239,12 @@ def run_mcmc_chain(
         leave=True,
         dynamic_ncols=True,
     )
+    warmup = driver_config.profile_warmup_iterations or 0
+    if status_callback is not None:
+        status_callback(chain_index, "MCMC warmup" if warmup else "MCMC sampling", 0,
+                        warmup or driver_config.num_samples)
+    loop_start = time.perf_counter() if profiling else 0.0
+    measured_start = loop_start
     for sample_index in iterator:
         rng_key, subkey = jax.random.split(rng_key)
         proposed_params, proposed_noise = propose_state(
@@ -267,6 +290,30 @@ def run_mcmc_chain(
                 )
                 pending_progress = 0
 
+        if status_callback is not None:
+            if sample_count <= warmup:
+                status_callback(chain_index, "MCMC warmup", sample_count, warmup)
+                if sample_count == warmup:
+                    status_callback(chain_index, "MCMC sampling", 0, driver_config.num_samples - warmup)
+            else:
+                status_callback(chain_index, "MCMC sampling", sample_count - warmup,
+                                driver_config.num_samples - warmup)
+        if profiling and sample_count == driver_config.profile_warmup_iterations:
+            measured_start = time.perf_counter()
+
+    loop_end = time.perf_counter() if profiling else 0.0
+    if status_callback is not None:
+        status_callback(chain_index, "Chain complete", driver_config.num_samples, driver_config.num_samples)
+    timings = None
+    if profiling:
+        timings = {
+            "initial_target_seconds": initial_target_seconds,
+            "warmup_seconds": measured_start - loop_start,
+            "warmup_iterations": driver_config.profile_warmup_iterations,
+            "measured_loop_seconds": loop_end - measured_start,
+            "measured_iterations": driver_config.num_samples - driver_config.profile_warmup_iterations,
+        }
+
     if progress_callback is not None and pending_progress:
         progress_callback(
             chain_index,
@@ -288,6 +335,7 @@ def run_mcmc_chain(
         initial_params=chain_initial_params,
         final_params=current_params,
         final_noise=np.asarray(current_noise),
+        timings=timings,
     )
 
 
@@ -299,8 +347,12 @@ def run_mcmc_chains(
     dataset_h5_path: str | Path | None = None,
     remove_lmk: tuple[int, ...] | None = None,
     collect_phylo_root_samples: bool = False,
+    status_callback: StatusCallback | None = None,
 ) -> list[ChainResult]:
-    """Run multiple independent chains with the configured chain backend."""
+    """Run independent chains; status_callback must be picklable in process mode.
+
+    The status callback executes in each chain's process, independently of tqdm.
+    """
 
     driver_config = driver_config or MCMCDriverConfig()
     _validate_driver_config(driver_config)
@@ -314,12 +366,14 @@ def run_mcmc_chains(
             dataset_h5_path=dataset_h5_path,
             remove_lmk=remove_lmk,
             collect_phylo_root_samples=collect_phylo_root_samples,
+            status_callback=status_callback,
         )
     return _run_mcmc_chains_sequential(
         context,
         driver_config=driver_config,
         keys=keys,
         collect_phylo_root_samples=collect_phylo_root_samples,
+        status_callback=status_callback,
     )
 
 
@@ -329,6 +383,7 @@ def _run_mcmc_chains_sequential(
     driver_config: MCMCDriverConfig,
     keys: jax.Array,
     collect_phylo_root_samples: bool,
+    status_callback: StatusCallback | None = None,
 ) -> list[ChainResult]:
     """Run multiple chains sequentially, with one tqdm bar per chain."""
 
@@ -361,6 +416,7 @@ def _run_mcmc_chains_sequential(
                 target=target,
                 target_and_phylo_root_state=target_and_phylo_root_state,
                 collect_phylo_root_samples=collect_phylo_root_samples,
+                status_callback=status_callback,
             )
         )
     return results
@@ -374,6 +430,7 @@ def _run_mcmc_chains_process(
     dataset_h5_path: str | Path | None,
     remove_lmk: tuple[int, ...] | None,
     collect_phylo_root_samples: bool,
+    status_callback: StatusCallback | None = None,
 ) -> list[ChainResult]:
     """Run independent chain chunks in spawned worker processes."""
 
@@ -406,7 +463,7 @@ def _run_mcmc_chains_process(
     total_progress, chain_progress = _open_process_progress_bars(driver_config)
     try:
         with ProcessPoolExecutor(max_workers=num_workers, mp_context=spawn_context) as executor:
-            pending = {executor.submit(_run_mcmc_chain_chunk_worker, args) for args in worker_args}
+            pending = {executor.submit(_run_mcmc_chain_chunk_worker, args, status_callback) for args in worker_args}
             while pending:
                 done, pending = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
                 _drain_progress_queue(progress_queue, chain_progress)
@@ -426,8 +483,10 @@ def _run_mcmc_chains_process(
     return [result for _, result in indexed_results]
 
 
-def _run_mcmc_chain_chunk_worker(args) -> list[tuple[int, ChainResult]]:
+def _run_mcmc_chain_chunk_worker(args, status_callback: StatusCallback | None = None) -> list[tuple[int, ChainResult]]:
     dataset_h5_path, model_config, driver_config, work_items, progress_queue, collect_phylo_root_samples, remove_lmk = args
+    if status_callback is not None:
+        status_callback(work_items[0][0], "Loading chain context", 0, None)
     dataset = load_augmented_butterfly_tree(dataset_h5_path, remove_lmk=remove_lmk)
     context = build_bffg_context(dataset, model_config)
     target = _build_mcmc_target(context)
@@ -467,6 +526,7 @@ def _run_mcmc_chain_chunk_worker(args) -> list[tuple[int, ChainResult]]:
             target_and_phylo_root_state=target_and_phylo_root_state,
             collect_phylo_root_samples=collect_phylo_root_samples,
             progress_callback=progress_callback,
+            status_callback=status_callback,
         )
         results.append((chain_index, result))
     return results
@@ -478,6 +538,7 @@ def run_mcmc(
     run_dir: str | Path,
     model_config: MCMCModelConfig | None = None,
     driver_config: MCMCDriverConfig | None = None,
+    status_callback: StatusCallback | None = None,
 ) -> MCMCRunResult:
     """Run MCMC and persist local monitoring artifacts."""
 
@@ -487,7 +548,11 @@ def run_mcmc(
     run_dir = prepare_run_dir(run_dir)
 
     start = time.perf_counter()
+    if status_callback is not None:
+        status_callback(None, "Building context", 0, None)
     context = build_bffg_context(dataset, model_config)
+    if status_callback is not None:
+        status_callback(None, "Running chains", 0, None)
     results = run_mcmc_chains(
         context,
         driver_config=driver_config,
@@ -495,7 +560,10 @@ def run_mcmc(
         dataset_h5_path=dataset.h5_path,
         remove_lmk=dataset.removed_landmarks,
         collect_phylo_root_samples=True,
+        status_callback=status_callback,
     )
+    if status_callback is not None:
+        status_callback(None, "Saving analysis", 0, None)
     summary, samples, log_posteriors, accepted = save_run_artifacts(
         run_dir,
         model_config=model_config,
@@ -719,6 +787,11 @@ def _deserialize_prng_key(values: tuple[int, ...]) -> jax.Array:
 def _validate_driver_config(config: MCMCDriverConfig) -> None:
     if config.num_samples < 1:
         raise ValueError(f"num_samples must be >= 1, got {config.num_samples}.")
+    warmup = config.profile_warmup_iterations
+    if warmup is not None and (
+        isinstance(warmup, bool) or not isinstance(warmup, int) or not 0 <= warmup < config.num_samples
+    ):
+        raise ValueError("profile_warmup_iterations must be null or an integer in [0, num_samples).")
     if config.num_chains < 1:
         raise ValueError(f"num_chains must be >= 1, got {config.num_chains}.")
     if config.chain_backend not in {"sequential", "process"}:

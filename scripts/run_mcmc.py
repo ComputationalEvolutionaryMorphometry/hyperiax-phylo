@@ -186,7 +186,7 @@ def _coerce_cli_override_value(section_name: str, key: str, value: object) -> ob
             return _coerce_init_param_config(value, field_path=f"model.{key}")
         return _coerce_config_value(value, getattr(MCMCModelConfig, key))
     if section_name == "driver":
-        return _coerce_config_value(value, getattr(MCMCDriverConfig, key))
+        return _coerce_typed_config_value(MCMCDriverConfig, key, value, getattr(MCMCDriverConfig, key))
     if section_name == "plot":
         return _coerce_config_value(value, getattr(TracePlotConfig, key))
     if section_name == "augment" and key == "remove_lmk":
@@ -340,6 +340,10 @@ def _typed_config_values(config_class, values: dict) -> dict:
 def _coerce_typed_config_value(config_class, name: str, value: object, default: object) -> object:
     if config_class is MCMCModelConfig and name in INIT_PARAM_CONFIG_KEYS:
         return _coerce_init_param_config(value, field_path=f"model.{name}")
+    if config_class is MCMCDriverConfig and name == "profile_warmup_iterations":
+        if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+            return value
+        raise ValueError("driver.profile_warmup_iterations must be null or an integer.")
     return _coerce_config_value(value, default)
 
 
