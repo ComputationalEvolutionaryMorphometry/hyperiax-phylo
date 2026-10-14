@@ -18,13 +18,10 @@ wheels/
 # data
 *.npz
 *.npy
-/data/**
-!/data/
-!/data/README.md
-!/data/butterflies/
-!/data/butterflies/.gitkeep
-!/data/beaks/
-!/data/beaks/.gitkeep
+*.h5
 
 .DS_Store
 AGENTS.md
+
+# Generated performance experiments (configs and implementation remain tracked).
+/runs/profiling/

@@ -93,9 +93,18 @@ driver:
   # progress_bar: set this to false to silence progress output.
   progress_bar: true
 
+  # Optional iteration timing; null disables profiling, otherwise excludes this many warmup iterations.
+  profile_warmup_iterations: null
+
 plot:
-  # scripts.evaluate reads this through --config; samples to skip only during downstream plotting.
+  # Discard this many draws per chain for evaluation summaries, diagnostics and plots.
   num_burnin: 500
 
-  # scripts.evaluate reads this through --config; stride used only for histogram plotting.
+  # Display stride for histograms/root curves; diagnostics and posterior means remain unthinned.
   thin: 1
+
+diagnostics:
+  rhat_threshold: 1.01
+  ess_threshold: 400
+  mcse_ratio_threshold: 0.05
+  num_pcs: 3

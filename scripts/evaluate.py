@@ -16,6 +16,8 @@ import h5py
 import numpy as np
 import yaml
 
+from src.diagnostics import DiagnosticConfig, diagnostic_config, evaluate_diagnostics, load_chains
+
 PARAMETER_NAMES = (
     "k_alpha",
     "k_sigma",
@@ -73,6 +75,7 @@ class EvaluationResult:
     hist_path: Path
     parameter_means: dict[str, float]
     gelman_rubin: dict[str, dict[str, object]] = field(default_factory=dict)
+    diagnostics: dict = field(default_factory=dict)
 
     def __iter__(self):
         return iter((self.leaves_path, self.root_path, self.trace_path, self.hist_path))
@@ -143,14 +146,18 @@ def evaluate_artifacts(
     data_h5: str | Path,
     num_burnin: int,
     thin: int,
+    diagnostics_config: DiagnosticConfig | None = None,
 ) -> EvaluationResult:
     """Run the full artifact evaluation and write standard run figures."""
 
     artifacts_h5 = Path(artifacts_h5)
     data_h5 = Path(data_h5)
     output_dir = artifacts_h5.parent
-    parameter_means = load_parameter_means(artifacts_h5, num_burnin=num_burnin, thin=thin)
-    gelman_rubin = load_gelman_rubin_diagnostics(artifacts_h5, num_burnin=num_burnin, thin=thin)
+    diagnostics = evaluate_diagnostics(artifacts_h5, num_burnin=num_burnin, config=diagnostics_config)
+    parameter_means = load_parameter_means(artifacts_h5, num_burnin=num_burnin, thin=1)
+    # Retain the result field for callers, but the new evaluation uses only the
+    # rank-based method. The legacy standalone helper is unchanged.
+    gelman_rubin = diagnostics["parameters"]["variables"]
     run_config = _load_run_config_for_artifact(artifacts_h5)
     from src.bffg import MCMCParams
 
@@ -189,6 +196,7 @@ def evaluate_artifacts(
         hist_path=hist_path,
         parameter_means=parameter_means,
         gelman_rubin=gelman_rubin,
+        diagnostics=diagnostics,
     )
 
 
@@ -902,9 +910,20 @@ def plot_root_shape(
     artifact_path = Path(artifact_path)
     output_path = artifact_path.parent / ROOT_OUTPUT_FILENAME if output_path is None else Path(output_path)
 
-    samples = _load_phylo_root_chain(artifact_path, DEFAULT_ROOT_CHAIN)
-    selected_samples = _post_burnin_thinned(samples, num_burnin=config.num_burnin, thin=config.thin)
-    _write_root_shape_plot(output_path, selected_samples, chain_name=DEFAULT_ROOT_CHAIN)
+    with h5py.File(artifact_path, "r") as artifact:
+        chain_ids, chains = load_chains(artifact, "samples/phylo_root", config.num_burnin, root=True)
+    if chains.shape[1] == 0 or not np.isfinite(chains).all():
+        raise ValueError("Root plotting requires finite post-burnin samples.")
+    # Mean and intervals use every retained draw. Only displayed curves are thinned.
+    samples = chains.reshape(-1, *chains.shape[2:])
+    available = chains[:, ::config.thin]
+    budget = max(ROOT_POSTERIOR_SAMPLE_COUNT, len(chain_ids))
+    displayed = []
+    for index, values in enumerate(available):
+        count = min(len(values), budget // len(chain_ids) + (index < budget % len(chain_ids)))
+        displayed.extend(values[np.linspace(0, len(values) - 1, count, dtype=int)])
+    _write_root_shape_plot(output_path, samples, chain_name=f"all {len(chain_ids)} chains",
+                           display_samples=np.asarray(displayed))
     return output_path
 
 
@@ -920,7 +939,8 @@ def _load_phylo_root_chain(artifact_path: Path, chain_name: str) -> np.ndarray:
     return samples
 
 
-def _write_root_shape_plot(output_path: Path, samples: np.ndarray, *, chain_name: str) -> None:
+def _write_root_shape_plot(output_path: Path, samples: np.ndarray, *, chain_name: str,
+                           display_samples: np.ndarray | None = None) -> None:
     _configure_matplotlib()
     import matplotlib.pyplot as plt
 
@@ -930,7 +950,7 @@ def _write_root_shape_plot(output_path: Path, samples: np.ndarray, *, chain_name
         _write_root_shape_plot_3d(output_path, plt, mean=mean, lower=lower, upper=upper, chain_name=chain_name)
         return
 
-    _write_root_shape_plot_2d(output_path, plt, samples=samples, mean=mean)
+    _write_root_shape_plot_2d(output_path, plt, samples=samples, mean=mean, display_samples=display_samples)
 
 
 def _write_root_shape_plot_2d(
@@ -939,9 +959,10 @@ def _write_root_shape_plot_2d(
     *,
     samples: np.ndarray,
     mean: np.ndarray,
+    display_samples: np.ndarray | None = None,
 ) -> None:
     fig, axis = plt.subplots(figsize=(6.8, 4.3), constrained_layout=False)
-    for sample in _posterior_shape_samples_for_plot(samples):
+    for sample in (_posterior_shape_samples_for_plot(samples) if display_samples is None else display_samples):
         axis.plot(
             sample[:, 0],
             sample[:, 1],
@@ -1128,6 +1149,8 @@ def _configure_matplotlib() -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifacts-path", type=Path, required=True, help="Path to a run artifacts.h5 file.")
+    parser.add_argument("--diagnostics-only", action="store_true",
+                        help="Only read saved chains and write diagnostics; do not load data or simulate leaf shapes.")
     parser.add_argument(
         "--config",
         type=Path,
@@ -1140,13 +1163,20 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     config = _load_evaluation_config(args.config)
-    _apply_gpu_visibility(config.get("gpu_visible", DEFAULT_GPU_VISIBLE))
     plot_config = _trace_plot_config_from_mapping(config.get("plot", {}))
+    _validate_plot_config(plot_config)
+    settings = diagnostic_config(config.get("diagnostics"))
+    if args.diagnostics_only:
+        evaluate_diagnostics(args.artifacts_path, num_burnin=plot_config.num_burnin, config=settings)
+        print(args.artifacts_path.parent / "diagnostics.json")
+        return 0
+    _apply_gpu_visibility(config.get("gpu_visible", DEFAULT_GPU_VISIBLE))
     result = evaluate_artifacts(
         artifacts_h5=args.artifacts_path,
         data_h5=_data_path_from_config(config),
         num_burnin=plot_config.num_burnin,
         thin=plot_config.thin,
+        **({"diagnostics_config": settings} if "diagnostics" in config else {}),
     )
     for output_path in result:
         print(output_path)
@@ -1155,6 +1185,8 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "parameter_means": result.parameter_means,
                 "gelman_rubin": result.gelman_rubin,
+                "diagnostics_path": str(args.artifacts_path.parent / "diagnostics.json"),
+                "diagnostic_status": result.diagnostics.get("status"),
             },
             indent=2,
             sort_keys=True,

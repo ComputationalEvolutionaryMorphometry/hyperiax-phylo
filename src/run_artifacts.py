@@ -78,6 +78,9 @@ def save_run_artifacts(
         "dataset_h5_path": str(dataset.h5_path),
         "node_count": dataset.tree.size,
     }
+    chain_timings = [getattr(result, "timings", None) for result in results]
+    if any(timing is not None for timing in chain_timings):
+        summary["chain_timings"] = chain_timings
     _write_json(run_dir / "summary.json", summary)
     _write_json(run_dir / "config.json", config_payload)
     return summary, samples, log_posteriors, accepted

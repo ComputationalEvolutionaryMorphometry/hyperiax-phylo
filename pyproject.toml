@@ -16,6 +16,9 @@ dependencies = [
     "tqdm>=4.68.2",
     "jax>=0.10.1",
     "jaxlib>=0.10.1",
+    "rich>=13",
+    "psutil>=6",
+    "arviz>=0.22,<0.23",
 ]
 
 [dependency-groups]
@@ -24,4 +27,5 @@ dev = [
 ]
 gpu = [
     "jax[cuda13]>=0.10.1",
+    "nvidia-ml-py>=12",
 ]
