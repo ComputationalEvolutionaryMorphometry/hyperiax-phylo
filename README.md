@@ -1,7 +1,7 @@
 # Hyperiax and Phylogenetic Inference from Shape Data
 
 This repository contains reproduction code for phylogenetic inference from
-landmark shape data using `hyperiax`, described in __Hyperiax and Phylogenetic
+landmark shape data using `hyperiax`, described in the paper __Hyperiax and Phylogenetic
 Inference from Shape Data__.
 
 ## Setup
@@ -22,7 +22,7 @@ uv sync --group gpu
 
 ## Data
 
-See data/README.md
+See data/README.md.
 
 ## Rebuild HDF5 Data
 
