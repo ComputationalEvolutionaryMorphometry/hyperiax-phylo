@@ -22,7 +22,7 @@ uv sync --group gpu
 
 ## Data
 
-This repository does NOT include the raw butterfly and beak datasets. Data access can be accquired by contacting the paper authors.
+See data/README.md
 
 ## Rebuild HDF5 Data
 
